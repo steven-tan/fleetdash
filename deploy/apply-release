@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# apply-release — installed to /opt/fleetdash/bin/apply-release (root:root, 0755)
+# by provision-target.sh. The low-privilege 'deploy' user is allowed to run
+# exactly this one command via sudo (see /etc/sudoers.d/fleetdash-deploy).
+#
+# It takes the binary the pipeline left at /tmp/fleetdash.new, installs it,
+# keeps the previous binary for rollback, restarts the service, and health-checks.
+# If the health check fails it rolls back and exits non-zero (fails the deploy).
+set -euo pipefail
+
+NEW=/tmp/fleetdash.new
+DST=/opt/fleetdash/fleetdash
+PREV=/opt/fleetdash/fleetdash.prev
+
+# Port comes from the same env file the service uses (FLEETDASH_LISTEN=:8080).
+PORT=8080
+if [ -r /etc/fleetdash/config.env ]; then
+  # shellcheck disable=SC1091
+  listen="$(. /etc/fleetdash/config.env >/dev/null 2>&1; echo "${FLEETDASH_LISTEN:-}")"
+  [ -n "${listen#:}" ] && PORT="${listen#:}"
+fi
+
+[ -f "$NEW" ] || { echo "apply-release: nothing at $NEW"; exit 1; }
+
+echo "apply-release: installing new binary"
+install -o fleetdash -g fleetdash -m 0755 "$NEW" "${DST}.incoming"
+[ -f "$DST" ] && cp -p "$DST" "$PREV"
+mv "${DST}.incoming" "$DST"
+rm -f "$NEW"
+
+echo "apply-release: restarting fleetdash"
+systemctl restart fleetdash
+sleep 2
+
+if curl -fsS "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then
+  echo "apply-release: healthy — $(curl -fsS "http://127.0.0.1:${PORT}/api/status" 2>/dev/null | tr -d '\n' | cut -c1-160)"
+  exit 0
+fi
+
+echo "apply-release: HEALTH CHECK FAILED on port ${PORT}, rolling back"
+if [ -f "$PREV" ]; then
+  cp -p "$PREV" "$DST"
+  systemctl restart fleetdash
+  sleep 2
+  if curl -fsS "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then
+    echo "apply-release: rolled back to previous binary"
+  else
+    echo "apply-release: rollback also unhealthy — needs a human"
+  fi
+else
+  echo "apply-release: no previous binary to roll back to"
+fi
+exit 1

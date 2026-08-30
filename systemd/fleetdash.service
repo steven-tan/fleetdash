@@ -1,0 +1,27 @@
+[Unit]
+Description=fleetdash node agent + dashboard
+Documentation=https://github.com/steven-tan/fleetdash
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fleetdash
+Group=fleetdash
+EnvironmentFile=/etc/fleetdash/config.env
+ExecStart=/opt/fleetdash/fleetdash
+Restart=on-failure
+RestartSec=2
+
+# Hardening — the process only opens a listening socket and reads /proc.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,169 @@
+# fleetdash CI/CD  —  Azure DevOps Pipelines
+# ---------------------------------------------------------------------------
+# The repo lives on GitHub; this pipeline runs in Azure DevOps (the same split
+# used at work). ADO learns about pushes/PRs through the Azure Pipelines GitHub
+# App service connection.
+#
+# Flow:   build_test  ->  deploy_dev  ->  deploy_stage  ->  deploy_prod
+#                                                              (manual approval)
+# Only commits on 'main' deploy. Pull requests run build_test only.
+# ---------------------------------------------------------------------------
+
+trigger:
+  branches:
+    include: [main]
+
+pr:
+  branches:
+    include: [main]
+
+variables:
+  GO_VERSION: '1.23.4'          # pinned; downloaded per run so the build is hermetic
+  AGENT_POOL: 'lab-selfhosted'  # self-hosted pool = the agent on ubuntu2404adm
+  # DEV_HOST / STAGE_HOST / PROD_HOST are defined as pipeline variables in the ADO
+  # UI (Pipeline > Edit > Variables), NOT here — they are internal tailnet
+  # hostnames and this repo is public.
+
+stages:
+  # =========================================================================
+  - stage: build_test
+    displayName: Build & test
+    jobs:
+      - job: build_test
+        pool:
+          name: $(AGENT_POOL)
+        steps:
+          - checkout: self
+            fetchDepth: 1
+
+          # Install the pinned Go toolchain into a temp dir and put it on PATH.
+          # Doing this in-pipeline (rather than relying on a tool pre-installed on
+          # the agent) keeps the build reproducible and makes a future switch to
+          # Microsoft-hosted agents a one-line change (just the pool).
+          - script: |
+              set -eu
+              curl -fsSL "https://go.dev/dl/go$(GO_VERSION).linux-amd64.tar.gz" -o "$(Agent.TempDirectory)/go.tgz"
+              rm -rf "$(Agent.TempDirectory)/goroot" && mkdir -p "$(Agent.TempDirectory)/goroot"
+              tar -C "$(Agent.TempDirectory)/goroot" --strip-components=1 -xzf "$(Agent.TempDirectory)/go.tgz"
+              echo "##vso[task.prependpath]$(Agent.TempDirectory)/goroot/bin"
+            displayName: Install Go $(GO_VERSION)
+
+          - script: |
+              set -eu
+              export GOCACHE="$(Pipeline.Workspace)/.gocache"
+              go version
+              go vet ./...
+              go test ./...
+            displayName: go vet + go test
+            # Tests run on the agent's arch (amd64) only. The arm64 build below is
+            # compile-checked but not test-run — see README "Architecture drift".
+
+          - script: |
+              set -eu
+              export GOCACHE="$(Pipeline.Workspace)/.gocache"
+              SHA="$(Build.SourceVersion)"
+              OUT="$(Build.ArtifactStagingDirectory)/dist"
+              mkdir -p "$OUT"
+              for arch in amd64 arm64; do
+                echo "building linux/$arch @ ${SHA:0:12}"
+                CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+                  go build -trimpath -ldflags "-s -w -X main.version=${SHA:0:12}" \
+                  -o "$OUT/fleetdash-linux-$arch" .
+              done
+              ls -l "$OUT"
+            displayName: Build (linux amd64 + arm64)
+
+          - publish: $(Build.ArtifactStagingDirectory)/dist
+            artifact: binaries
+
+  # =========================================================================
+  - stage: deploy_dev
+    displayName: Deploy · dev
+    dependsOn: build_test
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: deploy_dev
+        pool:
+          name: $(AGENT_POOL)
+        environment: fleetdash-dev
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self            # deployment jobs don't checkout by default
+                - download: current
+                  artifact: binaries
+                - task: DownloadSecureFile@1
+                  name: sshkey
+                  inputs:
+                    secureFile: fleetdash_deploy_key
+                - script: |
+                    set -eu
+                    chmod 600 "$(sshkey.secureFilePath)"
+                    ./deploy/deploy.sh \
+                      --host "$(DEV_HOST)" --env dev \
+                      --binary "$(Pipeline.Workspace)/binaries/fleetdash-linux-amd64" \
+                      --ssh-key "$(sshkey.secureFilePath)"
+                  displayName: Deploy to dev
+
+  # =========================================================================
+  - stage: deploy_stage
+    displayName: Deploy · stage
+    dependsOn: deploy_dev
+    condition: succeeded()
+    jobs:
+      - deployment: deploy_stage
+        pool:
+          name: $(AGENT_POOL)
+        environment: fleetdash-stage
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - download: current
+                  artifact: binaries
+                - task: DownloadSecureFile@1
+                  name: sshkey
+                  inputs:
+                    secureFile: fleetdash_deploy_key
+                - script: |
+                    set -eu
+                    chmod 600 "$(sshkey.secureFilePath)"
+                    ./deploy/deploy.sh \
+                      --host "$(STAGE_HOST)" --env stage \
+                      --binary "$(Pipeline.Workspace)/binaries/fleetdash-linux-amd64" \
+                      --ssh-key "$(sshkey.secureFilePath)"
+                  displayName: Deploy to stage
+
+  # =========================================================================
+  - stage: deploy_prod
+    displayName: Deploy · prod
+    dependsOn: deploy_stage
+    condition: succeeded()
+    jobs:
+      - deployment: deploy_prod
+        pool:
+          name: $(AGENT_POOL)
+        # Gate this stage: ADO UI > Pipelines > Environments > fleetdash-prod >
+        # "Approvals and checks" > add yourself as a required approver.
+        environment: fleetdash-prod
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - download: current
+                  artifact: binaries
+                - task: DownloadSecureFile@1
+                  name: sshkey
+                  inputs:
+                    secureFile: fleetdash_deploy_key
+                - script: |
+                    set -eu
+                    chmod 600 "$(sshkey.secureFilePath)"
+                    ./deploy/deploy.sh \
+                      --host "$(PROD_HOST)" --env prod \
+                      --binary "$(Pipeline.Workspace)/binaries/fleetdash-linux-arm64" \
+                      --ssh-key "$(sshkey.secureFilePath)"
+                  displayName: Deploy to prod

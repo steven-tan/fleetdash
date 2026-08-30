@@ -1,0 +1,19 @@
+# build output
+/fleetdash
+/dist/
+*.test
+*.out
+
+# real per-host config (contains internal tailnet hostnames)
+/config.env
+
+# keys / secrets — never commit
+fleetdash_deploy_key
+fleetdash_deploy_key.pub
+*.pem
+id_*
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
