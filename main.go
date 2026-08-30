@@ -324,7 +324,7 @@ const pageHTML = `<!doctype html>
 </style>
 </head>
 <body>
-<h1>fleetdash <span class="muted">&mdash; {{.Self.Node}} ({{.Self.Env}})</span></h1>
+<h1>fleetdash v1 <span class="muted">&mdash; {{.Self.Node}} ({{.Self.Env}})</span></h1>
 <div class="muted">generated {{.Generated}} &middot; auto-refresh 10s</div>
 {{if .VersionDrift}}<div class="drift">&#9888; version drift across fleet: {{range .AllVersions}}<code>{{.}}</code> {{end}}</div>{{end}}
 <table>
