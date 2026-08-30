@@ -33,6 +33,11 @@ func TestAPIStatus(t *testing.T) {
 	if s.Version == "" {
 		t.Fatal("version empty")
 	}
+	// load1 must always be serialized, even when 0 — no omitempty. A genuine
+	// idle reading of 0.00 has to stay distinguishable from an absent field.
+	if !strings.Contains(rr.Body.String(), `"load1"`) {
+		t.Errorf("response missing load1 field: %s", rr.Body.String())
+	}
 }
 
 func TestParsePeers(t *testing.T) {
