@@ -12,7 +12,16 @@
 trigger:
   branches:
     include: [main]
+  paths:
+    # Docs-only pushes to main should not build or deploy. The app is pure Go,
+    # so nothing under here can affect the binary. A commit that also touches
+    # code still runs — the skip only applies when EVERY changed file matches.
+    exclude:
+      - docs
+      - README.md
 
+# PR trigger is intentionally left unfiltered: every PR gets a full build+test
+# so the required 'build_test' status check always reports before a merge.
 pr:
   branches:
     include: [main]
