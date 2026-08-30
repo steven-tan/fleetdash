@@ -45,8 +45,10 @@ type Status struct {
 	GoArch        string    `json:"go_arch"`
 	Now           time.Time `json:"now"`
 	ProcUptimeSec int64     `json:"proc_uptime_sec"`
-	HostUptimeSec int64     `json:"host_uptime_sec,omitempty"`
-	Load1         float64   `json:"load1,omitempty"`
+	// No omitempty on the two below: a genuine 0 (idle box / just booted) is a
+	// real reading and must stay in the JSON, distinct from a field that's absent.
+	HostUptimeSec int64   `json:"host_uptime_sec"`
+	Load1         float64 `json:"load1"`
 }
 
 type config struct {
@@ -311,7 +313,9 @@ const pageHTML = `<!doctype html>
 <style>
   body { font: 14px/1.45 system-ui, sans-serif; margin: 2rem; color: #1b1b1b; }
   h1 { font-size: 1.1rem; margin-bottom: .2rem; }
+  h2 { font-size: .95rem; margin: 1.6rem 0 .3rem; }
   .muted { color: #777; }
+  .intro { max-width: 64ch; color: #333; margin: .6rem 0 0; }
   table { border-collapse: collapse; margin-top: 1rem; }
   th, td { border: 1px solid #ccc; padding: 4px 10px; text-align: left; white-space: nowrap; }
   th { background: #f2f2f2; }
@@ -321,11 +325,21 @@ const pageHTML = `<!doctype html>
   .down { background: #d73027; }
   .drift { background: #fff3cd; border: 1px solid #ffe08a; padding: 6px 10px; margin-top: 1rem; }
   code { background: #eee; padding: 0 4px; border-radius: 3px; }
+  dl.legend { margin: 0; max-width: 76ch; }
+  dl.legend dt { font-weight: 600; margin-top: .5rem; }
+  dl.legend dd { margin: 0 0 0 1.2rem; color: #555; }
 </style>
 </head>
 <body>
 <h1>fleetdash v1 <span class="muted">&mdash; {{.Self.Node}} ({{.Self.Env}})</span></h1>
 <div class="muted">generated {{.Generated}} &middot; auto-refresh 10s</div>
+<p class="intro">
+fleetdash runs the same small binary on every node in the lab fleet. Each node
+reports its own vitals at <code>/api/status</code>; this page fetches every peer
+live on each load and shows them in one table &mdash; so a deploy can be watched
+rolling from dev &rarr; stage &rarr; prod. Plain HTTP over Tailscale, no database:
+the table is rebuilt from scratch on every refresh.
+</p>
 {{if .VersionDrift}}<div class="drift">&#9888; version drift across fleet: {{range .AllVersions}}<code>{{.}}</code> {{end}}</div>{{end}}
 <table>
   <tr>
@@ -347,6 +361,23 @@ const pageHTML = `<!doctype html>
   </tr>
   {{end}}
 </table>
+
+<h2>What the columns mean</h2>
+<dl class="legend">
+  <dt><span class="dot up"></span> / <span class="dot down"></span> (dot)</dt>
+    <dd>green &mdash; the node answered; red &mdash; unreachable or returned an error</dd>
+  <dt>target</dt><dd>the URL this row was fetched from (<code>(self)</code> is this node)</dd>
+  <dt>env</dt><dd>pipeline stage the node belongs to: dev, stage, prod (or a plain monitored node)</dd>
+  <dt>version</dt><dd>first 12 characters of the git commit the running binary was built from</dd>
+  <dt>arch</dt><dd>CPU architecture of the build &mdash; <code>amd64</code> or <code>arm64</code></dd>
+  <dt>host uptime</dt><dd>how long the machine has been up, from <code>/proc/uptime</code></dd>
+  <dt>load1</dt><dd>1-minute load average from <code>/proc/loadavg</code> &mdash; roughly how many
+    processes were running or waiting to run; <code>0.00</code> on an idle box</dd>
+  <dt>detail</dt><dd><code>ok</code> when healthy; otherwise the error
+    (e.g. <code>HTTP 500</code>, <code>bad JSON</code>, connection refused)</dd>
+  <dt>&#9888; version drift</dt><dd>banner shown when nodes aren't all on the same version
+    &mdash; normal briefly while a deploy rolls through the fleet</dd>
+</dl>
 </body>
 </html>
 `
