@@ -62,12 +62,22 @@ stages:
               export GOCACHE="$(Pipeline.Workspace)/.gocache"
               go version
               go vet ./...
-              # -cover prints "coverage: NN.N% of statements" in the log each run.
-              # Visibility only for now — no threshold gate (see initiative notes).
-              go test -cover ./...
-            displayName: go vet + go test
+              # Coverage profile -> a "total:" line in the log, plus Cobertura
+              # XML for the ADO "Code Coverage" tab. No threshold gate yet
+              # (visibility only). atomic mode: the tests exercise concurrent code.
+              go test -covermode=atomic -coverprofile=coverage.out ./...
+              go tool cover -func=coverage.out | tail -1
+              go run github.com/boumenot/gocover-cobertura@v1.2.0 < coverage.out > coverage.xml
+            displayName: vet + test + coverage
             # Tests run on the agent's arch (amd64) only. The arm64 build below is
             # compile-checked but not test-run — see README "Architecture drift".
+
+          - task: PublishCodeCoverageResults@2
+            displayName: Publish coverage to the run
+            condition: succeededOrFailed()
+            inputs:
+              summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage.xml'
+              pathToSources: '$(System.DefaultWorkingDirectory)'
 
           - script: |
               set -eu
@@ -116,6 +126,11 @@ stages:
                       --binary "$(Pipeline.Workspace)/binaries/fleetdash-linux-amd64" \
                       --ssh-key "$(sshkey.secureFilePath)"
                   displayName: Deploy to dev
+                - script: |
+                    set -eu
+                    ./deploy/verify-release.sh \
+                      --host "$(DEV_HOST)" --version "$(Build.SourceVersion)"
+                  displayName: Verify dev runs this build
 
   # =========================================================================
   - stage: deploy_stage
@@ -146,6 +161,11 @@ stages:
                       --binary "$(Pipeline.Workspace)/binaries/fleetdash-linux-amd64" \
                       --ssh-key "$(sshkey.secureFilePath)"
                   displayName: Deploy to stage
+                - script: |
+                    set -eu
+                    ./deploy/verify-release.sh \
+                      --host "$(STAGE_HOST)" --version "$(Build.SourceVersion)"
+                  displayName: Verify stage runs this build
 
   # =========================================================================
   - stage: deploy_prod
@@ -178,3 +198,8 @@ stages:
                       --binary "$(Pipeline.Workspace)/binaries/fleetdash-linux-arm64" \
                       --ssh-key "$(sshkey.secureFilePath)"
                   displayName: Deploy to prod
+                - script: |
+                    set -eu
+                    ./deploy/verify-release.sh \
+                      --host "$(PROD_HOST)" --version "$(Build.SourceVersion)"
+                  displayName: Verify prod runs this build
