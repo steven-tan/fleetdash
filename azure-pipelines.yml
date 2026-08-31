@@ -62,7 +62,9 @@ stages:
               export GOCACHE="$(Pipeline.Workspace)/.gocache"
               go version
               go vet ./...
-              go test ./...
+              # -cover prints "coverage: NN.N% of statements" in the log each run.
+              # Visibility only for now — no threshold gate (see initiative notes).
+              go test -cover ./...
             displayName: go vet + go test
             # Tests run on the agent's arch (amd64) only. The arm64 build below is
             # compile-checked but not test-run — see README "Architecture drift".
