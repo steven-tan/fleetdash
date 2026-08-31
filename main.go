@@ -333,13 +333,6 @@ const pageHTML = `<!doctype html>
 <body>
 <h1>fleetdash v1 <span class="muted">&mdash; {{.Self.Node}} ({{.Self.Env}})</span></h1>
 <div class="muted">generated {{.Generated}} &middot; auto-refresh 10s</div>
-<p class="intro">
-fleetdash runs the same small binary on every node in the lab fleet. Each node
-reports its own vitals at <code>/api/status</code>; this page fetches every peer
-live on each load and shows them in one table &mdash; so a deploy can be watched
-rolling from dev &rarr; stage &rarr; prod. Plain HTTP over Tailscale, no database:
-the table is rebuilt from scratch on every refresh.
-</p>
 {{if .VersionDrift}}<div class="drift">&#9888; version drift across fleet: {{range .AllVersions}}<code>{{.}}</code> {{end}}</div>{{end}}
 <table>
   <tr>
@@ -362,15 +355,20 @@ the table is rebuilt from scratch on every refresh.
   {{end}}
 </table>
 
+<p class="intro">
+fleetdash runs the same small binary on every node in the lab fleet. Each node
+reports its own vitals at <code>/api/status</code>; this page fetches every peer
+live on each load and shows them in one table &mdash; so a deploy can be watched
+rolling from dev &rarr; stage &rarr; prod. Plain HTTP over Tailscale, no database:
+the table is rebuilt from scratch on every refresh.
+</p>
+
 <h2>What the columns mean</h2>
 <dl class="legend">
   <dt><span class="dot up"></span> / <span class="dot down"></span> (dot)</dt>
     <dd>green &mdash; the node answered; red &mdash; unreachable or returned an error</dd>
   <dt>target</dt><dd>the URL this row was fetched from (<code>(self)</code> is this node)</dd>
-  <dt>env</dt><dd>pipeline stage the node belongs to: dev, stage, prod (or a plain monitored node)</dd>
   <dt>version</dt><dd>first 12 characters of the git commit the running binary was built from</dd>
-  <dt>arch</dt><dd>CPU architecture of the build &mdash; <code>amd64</code> or <code>arm64</code></dd>
-  <dt>host uptime</dt><dd>how long the machine has been up, from <code>/proc/uptime</code></dd>
   <dt>load1</dt><dd>1-minute load average from <code>/proc/loadavg</code> &mdash; roughly how many
     processes were running or waiting to run; <code>0.00</code> on an idle box</dd>
   <dt>detail</dt><dd><code>ok</code> when healthy; otherwise the error
